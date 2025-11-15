@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Order Details - Event Management Platform{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div id="order-details">
+        <div class="spinner"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const orderId = window.location.pathname.split('/').pop();
+    const token = localStorage.getItem('access_token');
+    
+    if (!token) {
+        window.location.href = '/login';
+    }
+    
+    fetch(`/api/orders/${orderId}`, {
+        headers: {
+            'Authorization': 'Bearer ' + token
+        }
+    })
+    .then(response => response.json())
+    .then(order => {
+        const container = document.getElementById('order-details');
+        
+        container.innerHTML = `
+            <div class="card mb-4">
+                <h1>Order #${order.order_number}</h1>
+                <div class="grid grid-2 mt-3">
+                    <div>
+                        <strong>Event:</strong> ${order.event ? order.event.event_name : 'N/A'}<br>
+                        <strong>Date:</strong> ${new Date(order.created_at).toLocaleString()}<br>
+                        <strong>Status:</strong> ${order.status}
+                    </div>
+                    <div>
+                        <strong>Subtotal:</strong> $${order.subtotal}<br>
+                        <strong>Discount:</strong> $${order.discount_amount}<br>
+                        <strong>Tax:</strong> $${order.tax_amount}<br>
+                        <strong style="font-size: 1.2rem;">Total: $${order.total_amount}</strong>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2 class="card-header">Tickets</h2>
+                <div id="tickets-list">
+                    ${order.tickets && order.tickets.length > 0 ? `
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Ticket Number</th>
+                                    <th>Attendee</th>
+                                    <th>Email</th>
+                                    <th>Price</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${order.tickets.map(ticket => `
+                                    <tr>
+                                        <td>${ticket.ticket_number}</td>
+                                        <td>${ticket.attendee_name}</td>
+                                        <td>${ticket.attendee_email}</td>
+                                        <td>$${ticket.price_paid}</td>
+                                        <td>${ticket.status}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    ` : '<p>No tickets found.</p>'}
+                </div>
+            </div>
+        `;
+    })
+    .catch(error => {
+        console.error('Error loading order:', error);
+        document.getElementById('order-details').innerHTML = '<p class="text-center">Error loading order details.</p>';
+    });
+</script>
+{% endblock %}
+
+
+

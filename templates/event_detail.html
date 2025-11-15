@@ -1,0 +1,899 @@
+{% extends "base.html" %}
+
+{% block title %}Event Details - Event Management Platform{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div id="event-details">
+        <div class="spinner"></div>
+    </div>
+</div>
+
+<!-- Ticket Purchase Modal -->
+<div id="ticketModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Purchase Tickets</h2>
+            <button class="close-modal" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="ticketInfo" style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light-color); border-radius: 0.5rem;">
+                <p><strong>Ticket Type:</strong> <span id="modalTicketName"></span></p>
+                <p><strong>Price:</strong> $<span id="modalTicketPrice"></span> per ticket</p>
+                <p><strong>Your Credits:</strong> $<span id="walletCredits">0.00</span></p>
+                <p><strong>Total:</strong> $<span id="modalTotal">0.00</span></p>
+                <p id="insufficientMsg" style="color: var(--danger-color); display: none;"><strong>Insufficient credits. Please reduce quantity.</strong></p>
+            </div>
+            
+            <div class="form-group">
+                <label for="ticketQuantity">Number of Tickets *</label>
+                <input type="number" id="ticketQuantity" class="form-control" min="1" max="10" value="1" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="promoCode">Promotional Code (Optional)</label>
+                <input type="text" id="promoCode" class="form-control" placeholder="Enter promo code">
+            </div>
+            
+            <div style="margin-top: 2rem;">
+                <h3>Attendee Information</h3>
+                <div id="attendeesContainer">
+                    <!-- Attendee forms will be added here -->
+                </div>
+                <button type="button" class="btn btn-secondary" onclick="addAttendeeForm()" style="margin-top: 1rem;">
+                    + Add Another Attendee
+                </button>
+            </div>
+            
+            <div style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: flex-end;">
+                <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+                <button id="submitPurchase" class="btn btn-primary" onclick="submitTicketPurchase()">
+                    Purchase Tickets
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const eventId = window.location.pathname.split('/').pop();
+    const token = localStorage.getItem('access_token');
+    const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+    
+    fetch(`/api/events/${eventId}`, { headers })
+        .then(response => response.json())
+        .then(event => {
+            const container = document.getElementById('event-details');
+            
+            // Format date
+            const startDate = new Date(event.start_datetime);
+            const endDate = new Date(event.end_datetime);
+            
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            const isOrganizer = user && (user.user_type === 'admin' || user.user_id === event.organizer_id);
+            const canCancel = isOrganizer && event.status !== 'cancelled' && event.status !== 'completed';
+            
+            // Check if we're in manage mode (from URL parameter or manage button)
+            const urlParams = new URLSearchParams(window.location.search);
+            const manageMode = urlParams.get('manage') === 'true' || window.location.hash === '#manage';
+            
+            container.innerHTML = `
+                <div class="card mb-4">
+                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
+                        <div style="flex: 1;">
+                            <h1>${event.event_name}</h1>
+                            <p class="mt-2">${event.description || 'No description available.'}</p>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem;">
+                            ${isOrganizer ? `
+                                <a href="/events/${event.event_id}${manageMode ? '' : '?manage=true'}" class="btn ${manageMode ? 'btn-secondary' : 'btn-primary'}" style="text-decoration: none;">
+                                    ${manageMode ? '👁️ View' : '⚙️ Manage'}
+                                </a>
+                            ` : ''}
+                            ${canCancel ? `
+                                <button id="cancelEventBtn" class="btn btn-danger" onclick="cancelEvent()">
+                                    🚫 Cancel Event
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div class="grid grid-2 mt-3">
+                        <div>
+                            <strong>📅 Date & Time:</strong><br>
+                            ${startDate.toLocaleString()} - ${endDate.toLocaleString()}
+                        </div>
+                        <div>
+                            <strong>📍 Venue:</strong><br>
+                            ${event.venue ? event.venue.venue_name + ', ' + event.venue.city : 'TBA'}
+                        </div>
+                        <div>
+                            <strong>🏷️ Category:</strong><br>
+                            ${event.category || 'General'}
+                        </div>
+                        <div>
+                            <strong>📊 Status:</strong><br>
+                            <span style="text-transform: capitalize; font-weight: bold; color: ${event.status === 'cancelled' ? 'var(--danger-color)' : event.status === 'published' ? 'var(--success-color)' : 'inherit'}">${event.status}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                ${manageMode && isOrganizer ? `
+                    <div class="card mb-4">
+                        <h2 class="card-header">Manage Ticket Types</h2>
+                        <div id="manage-ticket-types">
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
+                ` : ''}
+                
+                <div class="card">
+                    <h2 class="card-header">${manageMode && isOrganizer ? 'Available Tickets (Public View)' : 'Available Tickets'}</h2>
+                    <div id="ticket-types">
+                        <div class="spinner"></div>
+                    </div>
+                </div>
+            `;
+            
+            // Load manage ticket types section if in manage mode
+            if (manageMode && isOrganizer) {
+                loadManageTicketTypes(event.event_id);
+            }
+            
+            // Load ticket types
+            if (event.ticket_types && event.ticket_types.length > 0) {
+                const isEventCancelled = event.status === 'cancelled';
+                document.getElementById('ticket-types').innerHTML = `
+                    ${isEventCancelled ? '<div class="alert alert-danger" style="margin-bottom: 1rem;"><strong>⚠️ This event has been cancelled.</strong> All ticket purchases have been refunded.</div>' : ''}
+                    <div class="grid grid-2">
+                        ${event.ticket_types.map(tt => `
+                            <div class="card">
+                                <div class="event-title">${tt.type_name}</div>
+                                <p class="mt-1">${tt.description || ''}</p>
+                                <div class="event-price">$${tt.price}</div>
+                                <p>Available: ${tt.quantity_available} / ${tt.quantity_total}</p>
+                                ${(() => {
+                                    const user = JSON.parse(localStorage.getItem('user') || '{}');
+                                    if (isEventCancelled) {
+                                        return '<p class="text-center" style="color: var(--danger-color);"><strong>Event Cancelled</strong></p>';
+                                    }
+                                    if (tt.quantity_available <= 0) {
+                                        return '<p class="text-center" style="color: var(--danger-color);">Sold Out</p>';
+                                    }
+                                    if (!user || (user.user_type !== 'attendee')) {
+                                        return '<p class="text-center">Login as an <strong>attendee</strong> to purchase.</p>';
+                                    }
+                                    // Safely pass the type name by wrapping in single quotes and escaping any single quotes
+                                    const safeName = String(tt.type_name || '').replace(/'/g, "\\'");
+                                    return `<button class="btn btn-primary" onclick="purchaseTicket(${tt.ticket_type_id}, ${tt.price}, '${safeName}')" style="width: 100%;">Purchase Ticket</button>`;
+                                })()}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                const user = JSON.parse(localStorage.getItem('user') || '{}');
+                const isOrganizer = user && (user.user_type === 'admin' || user.user_id === event.organizer_id);
+                if (isOrganizer) {
+                    // Show inline form for organizer to create a ticket type
+                    document.getElementById('ticket-types').innerHTML = `
+                        <div class="alert alert-info">No tickets available for this event. Create a ticket type to start selling.</div>
+                        <div class="card" style="padding: 1rem;">
+                            <h3>Create Ticket Type</h3>
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label>Name *</label>
+                                    <input id="tt_name" class="form-control" placeholder="General Admission" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Price (USD) *</label>
+                                    <input id="tt_price" type="number" step="0.01" min="0" class="form-control" placeholder="10.00" required>
+                                </div>
+                            </div>
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label>Total Quantity *</label>
+                                    <input id="tt_qty" type="number" min="1" class="form-control" placeholder="100" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Sale Starts *</label>
+                                    <input id="tt_sale_start" type="datetime-local" class="form-control" required>
+                                </div>
+                            </div>
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label>Sale Ends *</label>
+                                    <input id="tt_sale_end" type="datetime-local" class="form-control" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Description</label>
+                                    <input id="tt_desc" class="form-control" placeholder="Optional description">
+                                </div>
+                            </div>
+                            <button id="tt_create_btn" class="btn btn-primary">Create Ticket Type</button>
+                        </div>
+                    `;
+                    // Attach handler
+                    document.getElementById('tt_create_btn').addEventListener('click', async function () {
+                        if (!token) {
+                            alert('Please login as organizer to create ticket types');
+                            window.location.href = '/login';
+                            return;
+                        }
+                        const name = document.getElementById('tt_name').value.trim();
+                        const price = parseFloat(document.getElementById('tt_price').value);
+                        const qty = parseInt(document.getElementById('tt_qty').value);
+                        const saleStart = document.getElementById('tt_sale_start').value;
+                        const saleEnd = document.getElementById('tt_sale_end').value;
+                        const desc = document.getElementById('tt_desc').value.trim();
+                        if (!name || !(price >= 0) || !(qty > 0) || !saleStart || !saleEnd) {
+                            alert('Please fill all required fields correctly.');
+                            return;
+                        }
+                        const btn = this;
+                        btn.disabled = true;
+                        btn.textContent = 'Creating...';
+                        try {
+                            const payload = {
+                                type_name: name,
+                                price: price,
+                                quantity_total: qty,
+                                sale_start: new Date(saleStart).toISOString(),
+                                sale_end: new Date(saleEnd).toISOString(),
+                                description: desc || undefined
+                            };
+                            const resp = await fetch(`/api/events/${event.event_id}/ticket-types`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': 'Bearer ' + token
+                                },
+                                body: JSON.stringify(payload)
+                            });
+                            const result = await resp.json();
+                            if (!resp.ok) {
+                                alert(result.error || 'Failed to create ticket type');
+                                btn.disabled = false;
+                                btn.textContent = 'Create Ticket Type';
+                                return;
+                            }
+                            alert('Ticket type created!');
+                            // Reload page to show new ticket types
+                            window.location.reload();
+                        } catch (e) {
+                            console.error(e);
+                            alert('Error creating ticket type. Please try again.');
+                            btn.disabled = false;
+                            btn.textContent = 'Create Ticket Type';
+                        }
+                    });
+                } else {
+                    document.getElementById('ticket-types').innerHTML = '<p>No tickets available for this event.</p>';
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading event:', error);
+            document.getElementById('event-details').innerHTML = '<p class="text-center">Error loading event details.</p>';
+        });
+    
+    let currentTicketTypeId = null;
+    let currentTicketPrice = null;
+    let currentTicketName = null;
+    
+    function purchaseTicket(ticketTypeId, price, typeName) {
+        if (!token) {
+            alert('Please login to purchase tickets');
+            window.location.href = '/login';
+            return;
+        }
+        
+        currentTicketTypeId = ticketTypeId;
+        currentTicketPrice = price;
+        currentTicketName = typeName;
+        
+        // Update modal info
+        document.getElementById('modalTicketName').textContent = typeName;
+        document.getElementById('modalTicketPrice').textContent = price;
+        const userObj = JSON.parse(localStorage.getItem('user') || '{}');
+        document.getElementById('walletCredits').textContent = Number(userObj.credits || 0).toFixed(2);
+        
+        // Show modal
+        document.getElementById('ticketModal').classList.add('show');
+        document.getElementById('ticketQuantity').value = '1';
+        document.getElementById('promoCode').value = '';
+        document.getElementById('attendeesContainer').innerHTML = '';
+        addAttendeeForm();
+        setupQuantityListener(); // Re-setup listener for the modal
+        // Seed total
+        updateTotal();
+    }
+    
+    function closeModal() {
+        document.getElementById('ticketModal').classList.remove('show');
+    }
+    
+    function addAttendeeForm() {
+        const container = document.getElementById('attendeesContainer');
+        const attendeeCount = container.children.length + 1;
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        
+        const attendeeDiv = document.createElement('div');
+        attendeeDiv.className = 'attendee-form-item';
+        attendeeDiv.innerHTML = `
+            <h4>Attendee ${attendeeCount}</h4>
+            <div class="form-group">
+                <label>Full Name *</label>
+                <input type="text" class="form-control attendee-name" required 
+                       value="${user.first_name && user.last_name ? user.first_name + ' ' + user.last_name : ''}">
+            </div>
+            <div class="form-group">
+                <label>Email *</label>
+                <input type="email" class="form-control attendee-email" required 
+                       value="${user.email || ''}">
+            </div>
+            ${attendeeCount > 1 ? `<button type="button" class="remove-attendee" onclick="removeAttendee(this)">Remove</button>` : '<button type="button" class="remove-attendee" onclick="removeAttendee(this)" style="display: none;">Remove</button>'}
+        `;
+        container.appendChild(attendeeDiv);
+    }
+    
+    function removeAttendee(button) {
+        button.parentElement.remove();
+        // Renumber attendees
+        const items = document.querySelectorAll('.attendee-form-item');
+        items.forEach((item, index) => {
+            item.querySelector('h4').textContent = `Attendee ${index + 1}`;
+            const removeBtn = item.querySelector('.remove-attendee');
+            if (removeBtn) {
+                removeBtn.style.display = index === 0 ? 'none' : 'block';
+            }
+        });
+        // Update quantity input to match
+        document.getElementById('ticketQuantity').value = items.length;
+    }
+    
+    function submitTicketPurchase() {
+        const quantity = parseInt(document.getElementById('ticketQuantity').value);
+        if (!quantity || quantity < 1) {
+            alert('Please enter a valid quantity');
+            return;
+        }
+        
+        const attendeeItems = document.querySelectorAll('.attendee-form-item');
+        if (attendeeItems.length !== quantity) {
+            alert(`Please add information for all ${quantity} attendee(s)`);
+            return;
+        }
+        
+        const attendees = [];
+        let isValid = true;
+        
+        attendeeItems.forEach((item, index) => {
+            const name = item.querySelector('.attendee-name').value.trim();
+            const email = item.querySelector('.attendee-email').value.trim();
+            
+            if (!name || !email) {
+                isValid = false;
+                return;
+            }
+            
+            attendees.push({ name, email });
+        });
+        
+        if (!isValid) {
+            alert('Please fill in all attendee information');
+            return;
+        }
+        
+        // Get promo code if provided
+        const promoCode = document.getElementById('promoCode').value.trim();
+        
+        const orderData = {
+            event_id: parseInt(eventId),
+            ticket_items: [{
+                ticket_type_id: currentTicketTypeId,
+                quantity: quantity,
+                attendees: attendees
+            }],
+            payment_method: 'credit_card'
+        };
+        
+        if (promoCode) {
+            orderData.promo_code = promoCode;
+        }
+        
+        // Show loading
+        const submitBtn = document.getElementById('submitPurchase');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Processing...';
+        
+        fetch('/api/orders', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            },
+            body: JSON.stringify(orderData)
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.order) {
+                alert('Order placed successfully!');
+                closeModal();
+                if (result.user) {
+                    localStorage.setItem('user', JSON.stringify(result.user));
+                }
+                window.location.href = `/orders/${result.order.order_id}`;
+            } else {
+                alert(result.error || 'Failed to place order');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Purchase Tickets';
+            }
+        })
+        .catch(error => {
+            alert('An error occurred. Please try again.');
+            console.error(error);
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Purchase Tickets';
+        });
+    }
+    
+    // Setup quantity listener function
+    function setupQuantityListener() {
+        const quantityInput = document.getElementById('ticketQuantity');
+        if (quantityInput) {
+            // Remove existing listener if any
+            const newInput = quantityInput.cloneNode(true);
+            quantityInput.parentNode.replaceChild(newInput, quantityInput);
+            
+            newInput.addEventListener('change', function() {
+                const quantity = parseInt(this.value) || 1;
+                const container = document.getElementById('attendeesContainer');
+                const currentCount = container.children.length;
+                
+                if (quantity > currentCount) {
+                    // Add more forms
+                    for (let i = currentCount; i < quantity; i++) {
+                        addAttendeeForm();
+                    }
+                } else if (quantity < currentCount) {
+                    // Remove excess forms
+                    while (container.children.length > quantity) {
+                        container.lastElementChild.remove();
+                    }
+                    // Renumber
+                    const items = document.querySelectorAll('.attendee-form-item');
+                    items.forEach((item, index) => {
+                        item.querySelector('h4').textContent = `Attendee ${index + 1}`;
+                        const removeBtn = item.querySelector('.remove-attendee');
+                        if (removeBtn) {
+                            removeBtn.style.display = index === 0 ? 'none' : 'block';
+                        }
+                    });
+                }
+                updateTotal();
+            });
+        }
+    }
+    
+    function updateTotal() {
+        const qty = parseInt(document.getElementById('ticketQuantity').value) || 1;
+        const price = Number(currentTicketPrice || 0);
+        const total = qty * price;
+        document.getElementById('modalTotal').textContent = total.toFixed(2);
+        const credits = Number((JSON.parse(localStorage.getItem('user') || '{}').credits) || 0);
+        const insufficient = total > credits;
+        const msg = document.getElementById('insufficientMsg');
+        const btn = document.getElementById('submitPurchase');
+        msg.style.display = insufficient ? 'block' : 'none';
+        btn.disabled = insufficient;
+        if (insufficient) {
+            btn.title = 'Insufficient credits';
+        } else {
+            btn.removeAttribute('title');
+        }
+    }
+    
+    // Setup listener when page loads
+    document.addEventListener('DOMContentLoaded', setupQuantityListener);
+    
+    // Cancel event function
+    async function cancelEvent() {
+        if (!token) {
+            alert('Please login to cancel events');
+            window.location.href = '/login';
+            return;
+        }
+        
+        const confirmCancel = confirm('Are you sure you want to cancel this event? This will refund all ticket buyers and cannot be undone.');
+        if (!confirmCancel) {
+            return;
+        }
+        
+        const btn = document.getElementById('cancelEventBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Cancelling...';
+        }
+        
+        try {
+            const response = await fetch(`/api/events/${eventId}/cancel`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                alert(`Event cancelled successfully! ${result.refunded_orders_count || 0} order(s) refunded.`);
+                // Reload page to show updated status
+                window.location.reload();
+            } else {
+                alert(result.error || 'Failed to cancel event');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '🚫 Cancel Event';
+                }
+            }
+        } catch (error) {
+            console.error('Error cancelling event:', error);
+            alert('An error occurred while cancelling the event. Please try again.');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🚫 Cancel Event';
+            }
+        }
+    }
+    
+    // Load and manage ticket types
+    async function loadManageTicketTypes(eventId) {
+        const container = document.getElementById('manage-ticket-types');
+        if (!container) return;
+        
+        try {
+            const response = await fetch(`/api/events/${eventId}/ticket-types`);
+            const ticketTypes = await response.json();
+            
+            container.innerHTML = `
+                <div style="margin-bottom: 1rem;">
+                    <button class="btn btn-primary" onclick="showAddTicketTypeForm(${eventId})">
+                        ➕ Add New Ticket Type
+                    </button>
+                </div>
+                <div id="ticket-types-list">
+                    ${ticketTypes.length > 0 ? `
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Price</th>
+                                    <th>Available</th>
+                                    <th>Total</th>
+                                    <th>Sale Period</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${ticketTypes.map(tt => `
+                                    <tr>
+                                        <td><strong>${tt.type_name}</strong><br><small>${tt.description || 'No description'}</small></td>
+                                        <td>$${tt.price}</td>
+                                        <td>${tt.quantity_available} / ${tt.quantity_total}</td>
+                                        <td>${tt.quantity_total}</td>
+                                        <td>
+                                            ${new Date(tt.sale_start).toLocaleDateString()} -<br>
+                                            ${new Date(tt.sale_end).toLocaleDateString()}
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-secondary btn-sm" onclick="editTicketType(${eventId}, ${tt.ticket_type_id})" style="margin-right: 0.5rem;">Edit</button>
+                                            <button class="btn btn-danger btn-sm" onclick="deleteTicketType(${eventId}, ${tt.ticket_type_id}, '${tt.type_name.replace(/'/g, "\\'")}')">Delete</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    ` : '<p>No ticket types yet. Click "Add New Ticket Type" to create one.</p>'}
+                </div>
+                <div id="ticket-type-form-container" style="display: none; margin-top: 2rem;">
+                    <!-- Form will be inserted here -->
+                </div>
+            `;
+        } catch (error) {
+            console.error('Error loading ticket types:', error);
+            container.innerHTML = '<p class="text-center" style="color: var(--danger-color);">Error loading ticket types. Please refresh the page.</p>';
+        }
+    }
+    
+    function showAddTicketTypeForm(eventId) {
+        const container = document.getElementById('ticket-type-form-container');
+        if (!container) return;
+        
+        const now = new Date();
+        const defaultStart = new Date(now.getTime() + 24 * 60 * 60 * 1000); // Tomorrow
+        const defaultEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days from now
+        
+        container.style.display = 'block';
+        container.innerHTML = `
+            <div class="card" style="padding: 1.5rem;">
+                <h3>Add New Ticket Type</h3>
+                <form id="addTicketTypeForm" onsubmit="event.preventDefault(); createTicketType(${eventId});">
+                    <div class="grid grid-2">
+                        <div class="form-group">
+                            <label>Name *</label>
+                            <input id="tt_name" class="form-control" placeholder="General Admission" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Price (USD) *</label>
+                            <input id="tt_price" type="number" step="0.01" min="0" class="form-control" placeholder="10.00" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <textarea id="tt_desc" class="form-control" rows="2" placeholder="Optional description"></textarea>
+                    </div>
+                    <div class="grid grid-2">
+                        <div class="form-group">
+                            <label>Total Quantity *</label>
+                            <input id="tt_qty" type="number" min="1" class="form-control" placeholder="100" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Min Purchase</label>
+                            <input id="tt_min" type="number" min="1" class="form-control" value="1">
+                        </div>
+                    </div>
+                    <div class="grid grid-2">
+                        <div class="form-group">
+                            <label>Max Purchase</label>
+                            <input id="tt_max" type="number" min="1" class="form-control" value="10">
+                        </div>
+                        <div class="form-group">
+                            <label>Sale Starts *</label>
+                            <input id="tt_sale_start" type="datetime-local" class="form-control" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Sale Ends *</label>
+                        <input id="tt_sale_end" type="datetime-local" class="form-control" required>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                        <button type="submit" class="btn btn-primary">Create Ticket Type</button>
+                        <button type="button" class="btn btn-outline" onclick="document.getElementById('ticket-type-form-container').style.display='none';">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        `;
+        
+        // Set default dates
+        document.getElementById('tt_sale_start').value = defaultStart.toISOString().slice(0, 16);
+        document.getElementById('tt_sale_end').value = defaultEnd.toISOString().slice(0, 16);
+    }
+    
+    async function createTicketType(eventId) {
+        if (!token) {
+            alert('Please login to create ticket types');
+            return;
+        }
+        
+        const name = document.getElementById('tt_name').value.trim();
+        const price = parseFloat(document.getElementById('tt_price').value);
+        const qty = parseInt(document.getElementById('tt_qty').value);
+        const saleStart = document.getElementById('tt_sale_start').value;
+        const saleEnd = document.getElementById('tt_sale_end').value;
+        const desc = document.getElementById('tt_desc').value.trim();
+        const minPurchase = parseInt(document.getElementById('tt_min').value) || 1;
+        const maxPurchase = parseInt(document.getElementById('tt_max').value) || 10;
+        
+        if (!name || !(price >= 0) || !(qty > 0) || !saleStart || !saleEnd) {
+            alert('Please fill all required fields correctly.');
+            return;
+        }
+        
+        try {
+            const payload = {
+                type_name: name,
+                price: price,
+                quantity_total: qty,
+                sale_start: new Date(saleStart).toISOString(),
+                sale_end: new Date(saleEnd).toISOString(),
+                description: desc || undefined,
+                min_purchase: minPurchase,
+                max_purchase: maxPurchase
+            };
+            
+            const resp = await fetch(`/api/events/${eventId}/ticket-types`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify(payload)
+            });
+            
+            const result = await resp.json();
+            if (!resp.ok) {
+                alert(result.error || 'Failed to create ticket type');
+                return;
+            }
+            
+            alert('Ticket type created successfully!');
+            loadManageTicketTypes(eventId);
+            // Reload page to update public view
+            window.location.reload();
+        } catch (e) {
+            console.error(e);
+            alert('Error creating ticket type. Please try again.');
+        }
+    }
+    
+    function editTicketType(eventId, ticketTypeId) {
+        // Fetch ticket type details and show edit form
+        fetch(`/api/events/${eventId}/ticket-types`)
+            .then(response => response.json())
+            .then(ticketTypes => {
+                const tt = ticketTypes.find(t => t.ticket_type_id === ticketTypeId);
+                if (!tt) {
+                    alert('Ticket type not found');
+                    return;
+                }
+                
+                const container = document.getElementById('ticket-type-form-container');
+                container.style.display = 'block';
+                
+                const saleStart = new Date(tt.sale_start).toISOString().slice(0, 16);
+                const saleEnd = new Date(tt.sale_end).toISOString().slice(0, 16);
+                
+                container.innerHTML = `
+                    <div class="card" style="padding: 1.5rem;">
+                        <h3>Edit Ticket Type</h3>
+                        <form id="editTicketTypeForm" onsubmit="event.preventDefault(); updateTicketType(${eventId}, ${ticketTypeId});">
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label>Name *</label>
+                                    <input id="tt_edit_name" class="form-control" value="${tt.type_name.replace(/"/g, '&quot;')}" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Price (USD) *</label>
+                                    <input id="tt_edit_price" type="number" step="0.01" min="0" class="form-control" value="${tt.price}" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Description</label>
+                                <textarea id="tt_edit_desc" class="form-control" rows="2">${(tt.description || '').replace(/"/g, '&quot;')}</textarea>
+                            </div>
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label>Total Quantity *</label>
+                                    <input id="tt_edit_qty" type="number" min="1" class="form-control" value="${tt.quantity_total}" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Min Purchase</label>
+                                    <input id="tt_edit_min" type="number" min="1" class="form-control" value="${tt.min_purchase || 1}">
+                                </div>
+                            </div>
+                            <div class="grid grid-2">
+                                <div class="form-group">
+                                    <label>Max Purchase</label>
+                                    <input id="tt_edit_max" type="number" min="1" class="form-control" value="${tt.max_purchase || 10}">
+                                </div>
+                                <div class="form-group">
+                                    <label>Sale Starts *</label>
+                                    <input id="tt_edit_sale_start" type="datetime-local" class="form-control" value="${saleStart}" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Sale Ends *</label>
+                                <input id="tt_edit_sale_end" type="datetime-local" class="form-control" value="${saleEnd}" required>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                                <button type="submit" class="btn btn-primary">Update Ticket Type</button>
+                                <button type="button" class="btn btn-outline" onclick="document.getElementById('ticket-type-form-container').style.display='none';">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+                `;
+            })
+            .catch(error => {
+                console.error('Error loading ticket type:', error);
+                alert('Error loading ticket type details');
+            });
+    }
+    
+    async function updateTicketType(eventId, ticketTypeId) {
+        if (!token) {
+            alert('Please login to update ticket types');
+            return;
+        }
+        
+        const name = document.getElementById('tt_edit_name').value.trim();
+        const price = parseFloat(document.getElementById('tt_edit_price').value);
+        const qty = parseInt(document.getElementById('tt_edit_qty').value);
+        const saleStart = document.getElementById('tt_edit_sale_start').value;
+        const saleEnd = document.getElementById('tt_edit_sale_end').value;
+        const desc = document.getElementById('tt_edit_desc').value.trim();
+        const minPurchase = parseInt(document.getElementById('tt_edit_min').value) || 1;
+        const maxPurchase = parseInt(document.getElementById('tt_edit_max').value) || 10;
+        
+        if (!name || !(price >= 0) || !(qty > 0) || !saleStart || !saleEnd) {
+            alert('Please fill all required fields correctly.');
+            return;
+        }
+        
+        try {
+            const payload = {
+                type_name: name,
+                price: price,
+                quantity_total: qty,
+                sale_start: new Date(saleStart).toISOString(),
+                sale_end: new Date(saleEnd).toISOString(),
+                description: desc || undefined,
+                min_purchase: minPurchase,
+                max_purchase: maxPurchase
+            };
+            
+            const resp = await fetch(`/api/events/${eventId}/ticket-types/${ticketTypeId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify(payload)
+            });
+            
+            const result = await resp.json();
+            if (!resp.ok) {
+                alert(result.error || 'Failed to update ticket type');
+                return;
+            }
+            
+            alert('Ticket type updated successfully!');
+            loadManageTicketTypes(eventId);
+            // Reload page to update public view
+            window.location.reload();
+        } catch (e) {
+            console.error(e);
+            alert('Error updating ticket type. Please try again.');
+        }
+    }
+    
+    async function deleteTicketType(eventId, ticketTypeId, typeName) {
+        if (!token) {
+            alert('Please login to delete ticket types');
+            return;
+        }
+        
+        const confirmDelete = confirm(`Are you sure you want to delete "${typeName}"? This action cannot be undone if tickets have been sold.`);
+        if (!confirmDelete) {
+            return;
+        }
+        
+        try {
+            const resp = await fetch(`/api/events/${eventId}/ticket-types/${ticketTypeId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': 'Bearer ' + token
+                }
+            });
+            
+            const result = await resp.json();
+            if (!resp.ok) {
+                alert(result.error || 'Failed to delete ticket type');
+                return;
+            }
+            
+            alert('Ticket type deleted successfully!');
+            loadManageTicketTypes(eventId);
+            // Reload page to update public view
+            window.location.reload();
+        } catch (e) {
+            console.error(e);
+            alert('Error deleting ticket type. Please try again.');
+        }
+    }
+</script>
+{% endblock %}
+
+

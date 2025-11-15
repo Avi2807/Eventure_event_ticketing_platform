@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Event Management Platform{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <header>
+        <nav class="container">
+            <a href="{{ url_for('views.index') }}" class="logo">🎫 Eventure</a>
+            <ul class="nav-links" id="nav-links">
+                {% if current_user %}
+                <li><a href="/dashboard" class="nav-dashboard-link" style="display: block;">📊 Dashboard</a></li>
+                <li><a href="{{ url_for('views.events_list') }}">Events</a></li>
+                {% if current_user.user_type in ['organizer', 'admin'] %}
+                <li><a href="{{ url_for('views.create_event') }}">Create Event</a></li>
+                {% endif %}
+                <li><a href="{{ url_for('views.profile') }}">Profile</a></li>
+                <li><a href="#" onclick="logout(); return false;">Logout</a></li>
+                {% else %}
+                <li><a href="/dashboard" class="nav-dashboard-link" style="display: none;">📊 Dashboard</a></li>
+                <li><a href="{{ url_for('views.events_list') }}">Events</a></li>
+                <li><a href="{{ url_for('views.login') }}">Login</a></li>
+                <li><a href="{{ url_for('views.register') }}" class="btn btn-primary">Sign Up</a></li>
+                {% endif %}
+                <!-- Credits element - only shown for attendees via JavaScript -->
+                <li id="nav-credits" style="display:none; margin-left: 1rem; font-weight: 600;"></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="container mt-2">
+                        <div class="alert alert-{{ category }}">
+                            {{ message }}
+                        </div>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2024 Eventure. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        // Update navigation based on authentication status
+        document.addEventListener('DOMContentLoaded', function() {
+            const token = localStorage.getItem('access_token');
+            const user = JSON.parse(localStorage.getItem('user') || '{}');
+            const dashboardLinks = document.querySelectorAll('.nav-dashboard-link');
+            
+            // Show/hide dashboard link based on auth status
+            if (token && user && user.user_id) {
+                // User is logged in - show dashboard link
+                dashboardLinks.forEach(link => {
+                    link.style.display = 'block';
+                });
+                // Show credits only for attendees
+                const creditsEl = document.getElementById('nav-credits');
+                if (creditsEl) {
+                    // Only show credits for attendees, not organizers or admins
+                    if (user.user_type === 'attendee') {
+                        creditsEl.style.display = 'list-item';
+                        const amount = typeof user.credits !== 'undefined' ? Number(user.credits || 0) : 0;
+                        creditsEl.textContent = `💳 $${amount.toFixed(2)}`;
+                    } else {
+                        creditsEl.style.display = 'none';
+                    }
+                }
+            } else {
+                // User is not logged in - hide dashboard link
+                dashboardLinks.forEach(link => {
+                    link.style.display = 'none';
+                });
+                const creditsEl = document.getElementById('nav-credits');
+                if (creditsEl) creditsEl.style.display = 'none';
+            }
+        });
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
+

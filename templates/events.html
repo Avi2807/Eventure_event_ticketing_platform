@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Events - Event Management Platform{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="card mb-4">
+        <h1>Browse Events</h1>
+        <div class="grid grid-2 mt-2">
+            <div>
+                <label for="category-filter">Category</label>
+                <select id="category-filter" class="form-select">
+                    <option value="">All Categories</option>
+                </select>
+            </div>
+            <div>
+                <label for="city-filter">City</label>
+                <input type="text" id="city-filter" class="form-control" placeholder="Filter by city">
+            </div>
+        </div>
+    </div>
+
+    <div class="grid grid-3" id="events-list">
+        <div class="spinner"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const token = localStorage.getItem('access_token');
+    const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+    
+    function loadEvents() {
+        const category = document.getElementById('category-filter').value;
+        const city = document.getElementById('city-filter').value;
+        
+        let url = '/api/events?status=published';
+        if (category) url += '&category=' + category;
+        if (city) url += '&city=' + city;
+        
+        fetch(url, { headers })
+            .then(response => response.json())
+            .then(events => {
+                const container = document.getElementById('events-list');
+                if (events.length === 0) {
+                    container.innerHTML = '<p class="text-center">No events found.</p>';
+                    return;
+                }
+                
+                container.innerHTML = events.map(event => `
+                    <div class="event-card" onclick="window.location.href='/events/${event.event_id}'">
+                        <div class="event-image">
+                            ${event.banner_image ? `<img src="${event.banner_image}" alt="Banner" style="width:100%; height:100%; object-fit:cover;">` : '🎵'}
+                        </div>
+                        <div class="event-content">
+                            <div class="event-title">${event.event_name}</div>
+                            <div class="event-meta">
+                                📅 ${new Date(event.start_datetime).toLocaleDateString()}<br>
+                                📍 ${event.venue ? (event.venue.venue_name + ', ' + event.venue.city) : 'TBA'}<br>
+                                🏷️ ${event.category || 'General'}
+                            </div>
+                            <div class="btn btn-primary" style="width: 100%;">View Details</div>
+                        </div>
+                    </div>
+                `).join('');
+            })
+            .catch(error => {
+                console.error('Error loading events:', error);
+                document.getElementById('events-list').innerHTML = '<p class="text-center">Error loading events.</p>';
+            });
+    }
+    
+    // Load categories
+    fetch('/api/events?status=published', { headers })
+        .then(response => response.json())
+        .then(events => {
+            const categories = [...new Set(events.map(e => e.category).filter(Boolean))];
+            const select = document.getElementById('category-filter');
+            categories.forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat;
+                option.textContent = cat;
+                select.appendChild(option);
+            });
+        });
+    
+    document.getElementById('category-filter').addEventListener('change', loadEvents);
+    document.getElementById('city-filter').addEventListener('input', loadEvents);
+    
+    loadEvents();
+</script>
+{% endblock %}
+
+
+

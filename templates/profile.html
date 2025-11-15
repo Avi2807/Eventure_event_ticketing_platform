@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - Event Management Platform{% endblock %}
+
+{% block content %}
+<div class="container mt-4" style="max-width: 800px;">
+    <div class="card">
+        <h2 class="card-header">My Profile</h2>
+        <div id="profile-info">
+            <div class="spinner"></div>
+        </div>
+    </div>
+    
+    <!-- Account Statistics -->
+    <div class="card mt-4" id="profile-stats" style="display: none;">
+        <h2 class="card-header">Account Statistics</h2>
+        <div id="stats-content">
+            <div class="spinner"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    (function() {
+        const token = localStorage.getItem('access_token');
+        
+        if (!token) {
+            window.location.href = '/login';
+            return;
+        }
+        
+        // Load profile data
+        fetch('/api/auth/profile', {
+            headers: {
+                'Authorization': 'Bearer ' + token
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                if (response.status === 401) {
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('user');
+                    window.location.href = '/login';
+                    return null;
+                }
+                throw new Error('Failed to load profile');
+            }
+            return response.json();
+        })
+        .then(user => {
+            if (!user) return; // Already handled redirect
+            
+            const container = document.getElementById('profile-info');
+            
+            // Format date for display
+            const formatDate = (dateString) => {
+                if (!dateString) return '';
+                const date = new Date(dateString);
+                return date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+            };
+            
+            // Format account type
+            const formatAccountType = (type) => {
+                return type.charAt(0).toUpperCase() + type.slice(1);
+            };
+            
+            container.innerHTML = `
+                <div style="padding: 1.5rem;">
+                    <div class="profile-header" style="display: flex; align-items: center; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 2px solid #e5e7eb;">
+                        <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; font-size: 2rem; color: white; margin-right: 1.5rem;">
+                            ${user.first_name ? user.first_name.charAt(0).toUpperCase() : 'U'}
+                        </div>
+                        <div>
+                            <h3 style="margin: 0; font-size: 1.5rem;">${user.first_name || ''} ${user.last_name || ''}</h3>
+                            <p style="margin: 0.5rem 0 0 0; color: #6b7280;">${user.email}</p>
+                            <span style="display: inline-block; margin-top: 0.5rem; padding: 0.25rem 0.75rem; background: #dbeafe; color: #1e40af; border-radius: 0.375rem; font-size: 0.875rem;">
+                                ${formatAccountType(user.user_type)}
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <h3 style="margin-bottom: 1rem; color: #374151;">Personal Information</h3>
+                    <div class="form-group">
+                        <label style="font-weight: 600; color: #374151;">Email Address</label>
+                        <input type="email" class="form-control" value="${user.email || ''}" disabled style="background: #f3f4f6;">
+                        <small style="color: #6b7280;">Email cannot be changed</small>
+                    </div>
+                    
+                    <div class="grid grid-2" style="margin-top: 1rem;">
+                        <div class="form-group">
+                            <label style="font-weight: 600; color: #374151;">First Name</label>
+                            <input type="text" id="first_name" class="form-control" value="${user.first_name || ''}" placeholder="Enter first name">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-weight: 600; color: #374151;">Last Name</label>
+                            <input type="text" id="last_name" class="form-control" value="${user.last_name || ''}" placeholder="Enter last name">
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-2" style="margin-top: 1rem;">
+                        <div class="form-group">
+                            <label style="font-weight: 600; color: #374151;">Phone Number</label>
+                            <input type="tel" id="phone" class="form-control" value="${user.phone || ''}" placeholder="Enter phone number">
+                        </div>
+                        <div class="form-group">
+                            <label style="font-weight: 600; color: #374151;">Date of Birth</label>
+                            <input type="date" id="date_of_birth" class="form-control" value="${user.date_of_birth || ''}">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group" style="margin-top: 1rem;">
+                        <label style="font-weight: 600; color: #374151;">Account Type</label>
+                        <input type="text" class="form-control" value="${formatAccountType(user.user_type)}" disabled style="background: #f3f4f6;">
+                    </div>
+                    
+                    <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 2px solid #e5e7eb;">
+                        <button class="btn btn-primary" onclick="updateProfile()" style="width: 100%; padding: 0.75rem; font-size: 1rem;">
+                            💾 Update Profile
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            // Load account statistics
+            loadAccountStats();
+        })
+        .catch(error => {
+            console.error('Error loading profile:', error);
+            const container = document.getElementById('profile-info');
+            container.innerHTML = `
+                <div style="padding: 2rem; text-align: center;">
+                    <p style="color: #ef4444; margin-bottom: 1rem;">Error loading profile. Please try again.</p>
+                    <button class="btn btn-primary" onclick="window.location.reload()">Retry</button>
+                </div>
+            `;
+        });
+        
+        function loadAccountStats() {
+            // Load orders for statistics
+            fetch('/api/orders', {
+                headers: {
+                    'Authorization': 'Bearer ' + token
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to load statistics');
+                }
+                return response.json();
+            })
+            .then(orders => {
+                const statsCard = document.getElementById('profile-stats');
+                const statsContent = document.getElementById('stats-content');
+                
+                const totalOrders = orders.length;
+                const completedOrders = orders.filter(o => o.status === 'completed').length;
+                const totalSpent = orders
+                    .filter(o => o.status === 'completed')
+                    .reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0)
+                    .toFixed(2);
+                
+                statsContent.innerHTML = `
+                    <div style="padding: 1.5rem;">
+                        <div class="grid grid-3">
+                            <div style="text-align: center; padding: 1rem; background: #f9fafb; border-radius: 0.5rem;">
+                                <div style="font-size: 2rem; margin-bottom: 0.5rem;">📦</div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: #374151;">${totalOrders}</div>
+                                <div style="color: #6b7280; font-size: 0.875rem;">Total Orders</div>
+                            </div>
+                            <div style="text-align: center; padding: 1rem; background: #f9fafb; border-radius: 0.5rem;">
+                                <div style="font-size: 2rem; margin-bottom: 0.5rem;">✅</div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: #374151;">${completedOrders}</div>
+                                <div style="color: #6b7280; font-size: 0.875rem;">Completed</div>
+                            </div>
+                            <div style="text-align: center; padding: 1rem; background: #f9fafb; border-radius: 0.5rem;">
+                                <div style="font-size: 2rem; margin-bottom: 0.5rem;">💰</div>
+                                <div style="font-size: 1.5rem; font-weight: 600; color: #374151;">$${totalSpent}</div>
+                                <div style="color: #6b7280; font-size: 0.875rem;">Total Spent</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                statsCard.style.display = 'block';
+            })
+            .catch(error => {
+                console.error('Error loading statistics:', error);
+                // Don't show error, just hide stats section
+                document.getElementById('profile-stats').style.display = 'none';
+            });
+        }
+        
+        window.updateProfile = function() {
+            const first_name = document.getElementById('first_name').value.trim();
+            const last_name = document.getElementById('last_name').value.trim();
+            const phone = document.getElementById('phone').value.trim();
+            const date_of_birth = document.getElementById('date_of_birth').value;
+            
+            if (!first_name || !last_name) {
+                alert('First name and last name are required');
+                return;
+            }
+            
+            const data = {
+                first_name: first_name,
+                last_name: last_name,
+                phone: phone || null,
+                date_of_birth: date_of_birth || null
+            };
+            
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Updating...';
+            
+            fetch('/api/auth/profile', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.user) {
+                    localStorage.setItem('user', JSON.stringify(result.user));
+                    alert('Profile updated successfully!');
+                    window.location.reload();
+                } else {
+                    alert(result.error || 'Failed to update profile');
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                }
+            })
+            .catch(error => {
+                alert('An error occurred. Please try again.');
+                console.error(error);
+                btn.disabled = false;
+                btn.textContent = originalText;
+            });
+        };
+    })();
+</script>
+{% endblock %}
+
+
+

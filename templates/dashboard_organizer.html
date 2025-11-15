@@ -1,0 +1,528 @@
+{% extends "base.html" %}
+
+{% block title %}Organizer Dashboard - Event Management Platform{% endblock %}
+
+{% block content %}
+<div class="dashboard container">
+    <div class="dashboard-header" style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <h1>Organizer Dashboard</h1>
+            <p>Welcome back, <span id="user-name"></span>!</p>
+        </div>
+        <div style="display: flex; gap: 1rem;">
+            <a href="/events/create" class="btn btn-primary" style="text-decoration: none;">
+                ➕ Create Event
+            </a>
+            <button onclick="logout()" class="btn btn-danger" style="height: fit-content; padding: 0.75rem 1.5rem; font-size: 1rem; cursor: pointer;">
+                🚪 Logout
+            </button>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="stats-grid" id="stats-grid">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card mb-4">
+        <h2 class="card-header">Quick Actions</h2>
+        <div class="grid grid-3">
+            <a href="/events/create" class="btn btn-primary" style="text-align: center; text-decoration: none; display: block; padding: 1rem;">
+                ➕ Create Event
+            </a>
+            <a href="/events" class="btn btn-secondary" style="text-align: center; text-decoration: none; display: block; padding: 1rem;">
+                📋 All Events
+            </a>
+            <a href="/api/venues" class="btn btn-info" style="text-align: center; text-decoration: none; display: block; padding: 1rem; background: var(--info-color); color: white;">
+                🏢 Venues
+            </a>
+        </div>
+    </div>
+
+    <!-- My Events -->
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <h2 class="card-header" style="margin: 0;">My Events</h2>
+            <div>
+                <button onclick="filterEvents('all')" class="btn btn-outline" id="filter-all">All</button>
+                <button onclick="filterEvents('published')" class="btn btn-outline" id="filter-published">Published</button>
+                <button onclick="filterEvents('draft')" class="btn btn-outline" id="filter-draft">Draft</button>
+            </div>
+        </div>
+        <div id="my-events">
+            <div class="spinner"></div>
+        </div>
+    </div>
+
+    <!-- Event Analytics Summary -->
+    <div class="card mt-4">
+        <h2 class="card-header">Event Performance</h2>
+        <div id="event-analytics">
+            <div class="spinner"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const token = localStorage.getItem('access_token');
+    
+    if (!token) {
+        alert('Please login to access the dashboard');
+        window.location.href = '/login';
+        throw new Error('No token');
+    }
+    
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    if (user && user.first_name) {
+        document.getElementById('user-name').textContent = user.first_name;
+    } else {
+        fetch('/api/auth/profile', {
+            headers: {
+                'Authorization': 'Bearer ' + token
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Failed to get user profile');
+            }
+            return response.json();
+        })
+        .then(userData => {
+            localStorage.setItem('user', JSON.stringify(userData));
+            document.getElementById('user-name').textContent = userData.first_name || 'User';
+        })
+        .catch(error => {
+            console.error('Error fetching user:', error);
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('user');
+            window.location.href = '/login';
+        });
+    }
+    
+    let allEvents = [];
+    let currentFilter = 'all';
+    
+    // Load events
+    fetch('/api/events', {
+        headers: {
+            'Authorization': 'Bearer ' + token
+        }
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to fetch events');
+        }
+        return response.json();
+    })
+    .then(events => {
+        allEvents = events.filter(e => e.organizer_id === user.user_id);
+        
+        // Calculate stats (counts)
+        const totalEvents = allEvents.length;
+        const publishedEvents = allEvents.filter(e => e.status === 'published').length;
+        const draftEvents = allEvents.filter(e => e.status === 'draft').length;
+        
+        // Fetch analytics for each event and aggregate revenue/tickets
+        Promise.all(allEvents.map(event => 
+            fetch(`/api/events/${event.event_id}/analytics`, {
+                headers: { 'Authorization': 'Bearer ' + token }
+            }).then(r => r.ok ? r.json() : null).catch(() => null)
+        ))
+        .then(analyticsList => {
+            const filtered = analyticsList.filter(Boolean);
+            const totalRevenue = filtered.reduce((sum, a) => sum + Number(a.total_revenue || 0), 0);
+            const totalTickets = filtered.reduce((sum, a) => sum + Number(a.total_tickets_sold || 0), 0);
+
+            document.getElementById('stats-grid').innerHTML = `
+                <div class="stat-card">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">📅</div>
+                    <div class="stat-value">${totalEvents}</div>
+                    <div class="stat-label">Total Events</div>
+                </div>
+                <div class="stat-card">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">✅</div>
+                    <div class="stat-value">${publishedEvents}</div>
+                    <div class="stat-label">Published</div>
+                </div>
+                <div class="stat-card">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">📝</div>
+                    <div class="stat-value">${draftEvents}</div>
+                    <div class="stat-label">Drafts</div>
+                </div>
+                <div class="stat-card">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">💰</div>
+                    <div class="stat-value">$${totalRevenue.toFixed(2)}</div>
+                    <div class="stat-label">Total Revenue</div>
+                </div>
+                <div class="stat-card">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎫</div>
+                    <div class="stat-value">${totalTickets}</div>
+                    <div class="stat-label">Tickets Sold</div>
+                </div>
+            `;
+        });
+        
+        displayEvents(allEvents);
+        
+        // Load event analytics summary using analytics endpoint with orders fallback
+        if (allEvents.length > 0) {
+            Promise.all(allEvents.map(async (event) => {
+                // Try analytics endpoint first
+                try {
+                    const resp = await fetch(`/api/events/${event.event_id}/analytics`, {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    });
+                    if (resp.ok) {
+                        const a = await resp.json();
+                        return {
+                            event_name: event.event_name,
+                            event_id: event.event_id,
+                            revenue: Number(a.total_revenue || 0),
+                            tickets_sold: Number(a.total_tickets_sold || 0)
+                        };
+                    }
+                } catch (e) {}
+                // Fallback: compute from orders
+                try {
+                    const r = await fetch(`/api/orders?event_id=${event.event_id}`, {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    });
+                    const orders = r.ok ? await r.json() : [];
+                    const completed = Array.isArray(orders) ? orders.filter(o => o.status === 'completed') : [];
+                    const revenue = completed.reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
+                    const tickets = completed.reduce((sum, o) => sum + (o.tickets ? o.tickets.length : 0), 0);
+                    return {
+                        event_name: event.event_name,
+                        event_id: event.event_id,
+                        revenue,
+                        tickets_sold: tickets
+                    };
+                } catch (e) {
+                    return null;
+                }
+            }))
+            .then(analytics => {
+                const valid = analytics.filter(Boolean);
+                if (valid.length > 0) {
+                    // Prepare data for charts
+                    const eventNames = valid.map(a => a.event_name.length > 20 ? a.event_name.substring(0, 20) + '...' : a.event_name);
+                    const revenues = valid.map(a => Number(a.revenue || 0));
+                    const ticketsSold = valid.map(a => Number(a.tickets_sold || 0));
+                    
+                    // Calculate totals
+                    const totalRevenue = revenues.reduce((sum, r) => sum + r, 0);
+                    const totalTickets = ticketsSold.reduce((sum, t) => sum + t, 0);
+                    
+                    document.getElementById('event-analytics').innerHTML = `
+                        <div style="margin-bottom: 2rem;">
+                            <div class="grid grid-2" style="margin-bottom: 2rem;">
+                                <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1.5rem;">
+                                    <h3 style="margin: 0 0 0.5rem 0; color: white;">💰 Total Revenue</h3>
+                                    <div style="font-size: 2.5rem; font-weight: bold;">$${totalRevenue.toFixed(2)}</div>
+                                    <div style="margin-top: 0.5rem; opacity: 0.9;">Across all events</div>
+                                </div>
+                                <div class="card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; padding: 1.5rem;">
+                                    <h3 style="margin: 0 0 0.5rem 0; color: white;">🎫 Total Tickets Sold</h3>
+                                    <div style="font-size: 2.5rem; font-weight: bold;">${totalTickets}</div>
+                                    <div style="margin-top: 0.5rem; opacity: 0.9;">Across all events</div>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-2" style="margin-bottom: 2rem;">
+                                <div class="card">
+                                    <h3 style="margin-bottom: 1rem;">Revenue by Event</h3>
+                                    <canvas id="revenueChart" style="max-height: 300px;"></canvas>
+                                </div>
+                                <div class="card">
+                                    <h3 style="margin-bottom: 1rem;">Tickets Sold by Event</h3>
+                                    <canvas id="ticketsChart" style="max-height: 300px;"></canvas>
+                                </div>
+                            </div>
+                            
+                            ${valid.length <= 6 ? `
+                                <div class="card">
+                                    <h3 style="margin-bottom: 1rem;">Event Performance Overview</h3>
+                                    <div class="table-responsive">
+                                        <table class="table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Event Name</th>
+                                                    <th>Tickets Sold</th>
+                                                    <th>Revenue</th>
+                                                    <th>Avg Price/Ticket</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${valid.map(anal => {
+                                                    const avgPrice = anal.tickets_sold > 0 ? (anal.revenue / anal.tickets_sold) : 0;
+                                                    return `
+                                                        <tr>
+                                                            <td><strong>${anal.event_name}</strong></td>
+                                                            <td>${anal.tickets_sold}</td>
+                                                            <td>$${anal.revenue.toFixed(2)}</td>
+                                                            <td>$${avgPrice.toFixed(2)}</td>
+                                                            <td><a href="/events/${anal.event_id}" class="btn btn-primary btn-sm" style="text-decoration: none;">View</a></td>
+                                                        </tr>
+                                                    `;
+                                                }).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            ` : `
+                                <div class="card">
+                                    <h3 style="margin-bottom: 1rem;">Top Performing Events</h3>
+                                    <div class="table-responsive">
+                                        <table class="table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Event Name</th>
+                                                    <th>Tickets Sold</th>
+                                                    <th>Revenue</th>
+                                                    <th>Avg Price/Ticket</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${valid.slice(0, 6).map(anal => {
+                                                    const avgPrice = anal.tickets_sold > 0 ? (anal.revenue / anal.tickets_sold) : 0;
+                                                    return `
+                                                        <tr>
+                                                            <td><strong>${anal.event_name}</strong></td>
+                                                            <td>${anal.tickets_sold}</td>
+                                                            <td>$${anal.revenue.toFixed(2)}</td>
+                                                            <td>$${avgPrice.toFixed(2)}</td>
+                                                            <td><a href="/events/${anal.event_id}" class="btn btn-primary btn-sm" style="text-decoration: none;">View</a></td>
+                                                        </tr>
+                                                    `;
+                                                }).join('')}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            `}
+                        </div>
+                    `;
+                    
+                    // Create Revenue Chart
+                    setTimeout(() => {
+                        const revenueCtx = document.getElementById('revenueChart');
+                        if (revenueCtx) {
+                            new Chart(revenueCtx, {
+                                type: 'bar',
+                                data: {
+                                    labels: eventNames,
+                                    datasets: [{
+                                        label: 'Revenue ($)',
+                                        data: revenues,
+                                        backgroundColor: [
+                                            'rgba(102, 126, 234, 0.8)',
+                                            'rgba(118, 75, 162, 0.8)',
+                                            'rgba(240, 147, 251, 0.8)',
+                                            'rgba(245, 87, 108, 0.8)',
+                                            'rgba(255, 193, 7, 0.8)',
+                                            'rgba(76, 175, 80, 0.8)'
+                                        ],
+                                        borderColor: [
+                                            'rgba(102, 126, 234, 1)',
+                                            'rgba(118, 75, 162, 1)',
+                                            'rgba(240, 147, 251, 1)',
+                                            'rgba(245, 87, 108, 1)',
+                                            'rgba(255, 193, 7, 1)',
+                                            'rgba(76, 175, 80, 1)'
+                                        ],
+                                        borderWidth: 2,
+                                        borderRadius: 8
+                                    }]
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: true,
+                                    plugins: {
+                                        legend: {
+                                            display: false
+                                        },
+                                        tooltip: {
+                                            callbacks: {
+                                                label: function(context) {
+                                                    return 'Revenue: $' + context.parsed.y.toFixed(2);
+                                                }
+                                            }
+                                        }
+                                    },
+                                    scales: {
+                                        y: {
+                                            beginAtZero: true,
+                                            ticks: {
+                                                callback: function(value) {
+                                                    return '$' + value.toFixed(0);
+                                                }
+                                            }
+                                        },
+                                        x: {
+                                            ticks: {
+                                                maxRotation: 45,
+                                                minRotation: 45
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                        
+                        // Create Tickets Sold Chart
+                        const ticketsCtx = document.getElementById('ticketsChart');
+                        if (ticketsCtx) {
+                            new Chart(ticketsCtx, {
+                                type: 'doughnut',
+                                data: {
+                                    labels: eventNames,
+                                    datasets: [{
+                                        label: 'Tickets Sold',
+                                        data: ticketsSold,
+                                        backgroundColor: [
+                                            'rgba(102, 126, 234, 0.8)',
+                                            'rgba(118, 75, 162, 0.8)',
+                                            'rgba(240, 147, 251, 0.8)',
+                                            'rgba(245, 87, 108, 0.8)',
+                                            'rgba(255, 193, 7, 0.8)',
+                                            'rgba(76, 175, 80, 0.8)'
+                                        ],
+                                        borderColor: [
+                                            'rgba(102, 126, 234, 1)',
+                                            'rgba(118, 75, 162, 1)',
+                                            'rgba(240, 147, 251, 1)',
+                                            'rgba(245, 87, 108, 1)',
+                                            'rgba(255, 193, 7, 1)',
+                                            'rgba(76, 175, 80, 1)'
+                                        ],
+                                        borderWidth: 2
+                                    }]
+                                },
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: true,
+                                    plugins: {
+                                        legend: {
+                                            position: 'right',
+                                            labels: {
+                                                padding: 15,
+                                                usePointStyle: true
+                                            }
+                                        },
+                                        tooltip: {
+                                            callbacks: {
+                                                label: function(context) {
+                                                    const label = context.label || '';
+                                                    const value = context.parsed || 0;
+                                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                                    const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                                    return label + ': ' + value + ' tickets (' + percentage + '%)';
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }, 100);
+                } else {
+                    document.getElementById('event-analytics').innerHTML = '<p class="text-center">No analytics data available yet. Create events and sell tickets to see performance metrics.</p>';
+                }
+            });
+        } else {
+            document.getElementById('event-analytics').innerHTML = '<p class="text-center">No events yet. Create your first event to get started!</p>';
+        }
+    })
+    .catch(error => {
+        console.error('Error loading events:', error);
+        document.getElementById('my-events').innerHTML = '<p class="text-center">Error loading events. Please refresh the page.</p>';
+        document.getElementById('event-analytics').innerHTML = '<p class="text-center">Error loading analytics. Please refresh the page.</p>';
+    });
+    
+    function filterEvents(status) {
+        currentFilter = status;
+        document.querySelectorAll('[id^="filter-"]').forEach(btn => {
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-outline');
+        });
+        document.getElementById(`filter-${status}`).classList.remove('btn-outline');
+        document.getElementById(`filter-${status}`).classList.add('btn-primary');
+        
+        const filtered = status === 'all' ? allEvents : allEvents.filter(e => e.status === status);
+        displayEvents(filtered);
+    }
+    
+    function displayEvents(events) {
+        document.getElementById('my-events').innerHTML = events.length > 0 ? `
+            <div class="grid grid-3">
+                ${events.map(event => `
+                    <div class="event-card" onclick="window.location.href='/events/${event.event_id}'">
+                        <div class="event-image">
+                            ${event.banner_image ? `<img src="${event.banner_image}" alt="Banner" style="width:100%; height:100%; object-fit:cover;">` : '🎵'}
+                        </div>
+                        <div class="event-content">
+                            <div class="event-title">${event.event_name}</div>
+                            <div class="event-meta">
+                                Status: <strong>${event.status}</strong><br>
+                                📅 ${new Date(event.start_datetime).toLocaleDateString()}<br>
+                                📍 ${event.venue ? (event.venue.venue_name + ', ' + event.venue.city) : 'TBA'}
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; margin-top: 1rem; flex-wrap: wrap;">
+                                <a href="/events/${event.event_id}" class="btn btn-primary" style="flex: 1; min-width: 80px; text-align: center; text-decoration: none;">View</a>
+                                <a href="/events/${event.event_id}?manage=true" class="btn btn-secondary" style="flex: 1; min-width: 80px; text-align: center; text-decoration: none;">Manage</a>
+                                ${event.status !== 'cancelled' && event.status !== 'completed' ? `
+                                    <button onclick="cancelEventFromDashboard(${event.event_id}, '${event.event_name.replace(/'/g, "\\'")}')" class="btn btn-danger" style="flex: 1; min-width: 100px; text-align: center;">Cancel</button>
+                                ` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        ` : '<p class="text-center">No events found. <a href="/events/create" class="btn btn-primary">Create your first event</a></p>';
+    }
+    
+    // Cancel event from dashboard
+    async function cancelEventFromDashboard(eventId, eventName) {
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            alert('Please login to cancel events');
+            window.location.href = '/login';
+            return;
+        }
+        
+        const confirmCancel = confirm(`Are you sure you want to cancel "${eventName}"? This will refund all ticket buyers and cannot be undone.`);
+        if (!confirmCancel) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/events/${eventId}/cancel`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': 'Bearer ' + token,
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                alert(`Event cancelled successfully! ${result.refunded_orders_count || 0} order(s) refunded.`);
+                // Reload page to show updated status
+                window.location.reload();
+            } else {
+                alert(result.error || 'Failed to cancel event');
+            }
+        } catch (error) {
+            console.error('Error cancelling event:', error);
+            alert('An error occurred while cancelling the event. Please try again.');
+        }
+    }
+</script>
+{% endblock %}
+

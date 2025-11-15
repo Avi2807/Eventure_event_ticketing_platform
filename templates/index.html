@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+
+{% block title %}Home - Eventure - Modern Event Management Platform{% endblock %}
+
+{% block content %}
+<div class="hero">
+    <div class="container">
+        <h1>Welcome to Eventure</h1>
+        <p>Your one-stop platform for discovering and managing amazing events. Experience seamless event management with cutting-edge technology.</p>
+        {% if not current_user %}
+        <a href="{{ url_for('views.register') }}" class="btn btn-primary">Get Started</a>
+        <a href="{{ url_for('views.events_list') }}" class="btn btn-outline" style="margin-left: 1rem;">Browse Events</a>
+        {% else %}
+        <a href="{{ url_for('views.events_list') }}" class="btn btn-primary">Browse Events</a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Features Section -->
+<section class="features">
+    <div class="container">
+        <h2 class="section-title">Why Choose Eventure?</h2>
+        <p class="section-subtitle">Discover powerful features designed to make event management effortless and enjoyable</p>
+        <div class="features-grid">
+            <div class="feature-card">
+                <span class="feature-icon">🎫</span>
+                <h3>Easy Ticket Management</h3>
+                <p>Streamlined ticket purchasing with secure payment processing. Manage your tickets, view order history, and get instant confirmations.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">📊</span>
+                <h3>Real-Time Analytics</h3>
+                <p>Track your event performance with comprehensive dashboards. Monitor sales, attendance, and revenue in real-time.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">💳</span>
+                <h3>Credit System</h3>
+                <p>Flexible payment options with built-in credit system. Earn and use credits for faster transactions and exclusive benefits.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🏢</span>
+                <h3>Venue Management</h3>
+                <p>Comprehensive venue database with detailed information. Find the perfect location for your event with ease.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">👥</span>
+                <h3>Multi-Attendee Support</h3>
+                <p>Purchase tickets for multiple attendees in one transaction. Perfect for groups, families, and corporate bookings.</p>
+            </div>
+            <div class="feature-card">
+                <span class="feature-icon">🔒</span>
+                <h3>Secure & Reliable</h3>
+                <p>Bank-level security for all transactions. Your data and payments are protected with industry-standard encryption.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Featured Events Section -->
+<div class="container mt-4 mb-4">
+    <h2 class="section-title">Featured Events</h2>
+    <p class="section-subtitle">Discover trending events happening near you</p>
+    <div class="grid grid-3" id="featured-events">
+        <div class="spinner"></div>
+    </div>
+</div>
+
+<!-- CTA Section -->
+<div class="container mt-4 mb-4">
+    <div class="card">
+        <div class="grid grid-2">
+            <div>
+                <h3 style="font-size: 2rem; margin-bottom: 1rem; background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">For Event Organizers</h3>
+                <p style="color: var(--text-secondary); line-height: 1.8; margin-bottom: 1.5rem;">Create and manage your events with ease. Track sales, manage attendees, and grow your audience with powerful analytics and tools.</p>
+                <a href="{{ url_for('views.register') }}?type=organizer" class="btn btn-primary">Become an Organizer</a>
+            </div>
+            <div>
+                <h3 style="font-size: 2rem; margin-bottom: 1rem; background: linear-gradient(135deg, var(--secondary-color) 0%, var(--accent-purple) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">For Attendees</h3>
+                <p style="color: var(--text-secondary); line-height: 1.8; margin-bottom: 1.5rem;">Discover amazing events, purchase tickets, and enjoy seamless check-in experiences. Join thousands of event-goers today.</p>
+                <a href="{{ url_for('views.register') }}?type=attendee" class="btn btn-secondary">Join as Attendee</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Check if user is logged in and update navigation
+    document.addEventListener('DOMContentLoaded', function() {
+        const token = localStorage.getItem('access_token');
+        if (token) {
+            // User is logged in - navigation will show logged-in state
+            // This is handled by server-side template, but we ensure consistency
+        }
+    });
+    
+    // Load featured events
+    fetch('/api/events?status=published&limit=6')
+        .then(response => response.json())
+        .then(events => {
+            const container = document.getElementById('featured-events');
+            if (events.length === 0) {
+                container.innerHTML = '<p class="text-center">No events available at the moment.</p>';
+                return;
+            }
+            container.innerHTML = events.slice(0, 6).map(event => `
+                <div class="event-card" onclick="window.location.href='/events/${event.event_id}'">
+                    <div class="event-image">🎵</div>
+                    <div class="event-content">
+                        <div class="event-title">${event.event_name}</div>
+                        <div class="event-meta">
+                            📅 ${new Date(event.start_datetime).toLocaleDateString()}<br>
+                            📍 ${event.venue ? (event.venue.venue_name + ', ' + event.venue.city) : 'TBA'}
+                        </div>
+                        <div class="btn btn-primary" style="width: 100%;">View Details</div>
+                    </div>
+                </div>
+            `).join('');
+        })
+        .catch(error => {
+            console.error('Error loading events:', error);
+            document.getElementById('featured-events').innerHTML = '<p class="text-center">Error loading events. Please try again later.</p>';
+        });
+</script>
+{% endblock %}
+

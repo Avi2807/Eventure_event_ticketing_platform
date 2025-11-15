@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Register - Event Management Platform{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 500px; margin: 4rem auto;">
+    <div class="card">
+        <h2 class="card-header text-center">Create Account</h2>
+        <form id="registerForm" method="POST" action="/api/auth/register">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" class="form-control" required minlength="6">
+            </div>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="first_name">First Name</label>
+                    <input type="text" id="first_name" name="first_name" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="last_name">Last Name</label>
+                    <input type="text" id="last_name" name="last_name" class="form-control" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="phone">Phone (Optional)</label>
+                <input type="tel" id="phone" name="phone" class="form-control">
+            </div>
+            <div class="form-group">
+                <label for="date_of_birth">Date of Birth (Optional)</label>
+                <input type="date" id="date_of_birth" name="date_of_birth" class="form-control">
+            </div>
+            <div class="form-group">
+                <label for="user_type">Account Type</label>
+                <select id="user_type" name="user_type" class="form-select" required>
+                    <option value="attendee">Attendee</option>
+                    <option value="organizer">Organizer</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Sign Up</button>
+        </form>
+        <p class="text-center mt-2">
+            Already have an account? <a href="{{ url_for('views.login') }}">Login here</a>
+        </p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Set user type from URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const type = urlParams.get('type');
+    if (type) {
+        document.getElementById('user_type').value = type;
+    }
+    
+    document.getElementById('registerForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+        const data = Object.fromEntries(formData);
+        
+        try {
+            const response = await fetch('/api/auth/register', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                // Store token
+                localStorage.setItem('access_token', result.access_token);
+                localStorage.setItem('user', JSON.stringify(result.user));
+                // Redirect to dashboard
+                window.location.href = '/dashboard';
+            } else {
+                alert(result.error || 'Registration failed');
+            }
+        } catch (error) {
+            alert('An error occurred. Please try again.');
+            console.error(error);
+        }
+    });
+</script>
+{% endblock %}
+

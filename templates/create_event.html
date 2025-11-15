@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+
+{% block title %}Create Event - Event Management Platform{% endblock %}
+
+{% block content %}
+<div class="container mt-4" style="max-width: 800px;">
+    <div class="card">
+        <h2 class="card-header">Create New Event</h2>
+        <form id="createEventForm">
+            <div class="form-group">
+                <label for="event_name">Event Name</label>
+                <input type="text" id="event_name" name="event_name" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" class="form-control" rows="4"></textarea>
+            </div>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="venue_id">Venue</label>
+                    <select id="venue_id" name="venue_id" class="form-select" required>
+                        <option value="">Select a venue</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="category">Category</label>
+                    <input type="text" id="category" name="category" class="form-control" placeholder="e.g., Music, Sports, Conference">
+                </div>
+            </div>
+            <div class="grid grid-2">
+                <div class="form-group">
+                    <label for="start_datetime">Start Date & Time</label>
+                    <input type="datetime-local" id="start_datetime" name="start_datetime" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="end_datetime">End Date & Time</label>
+                    <input type="datetime-local" id="end_datetime" name="end_datetime" class="form-control" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="banner_image">Banner Image</label>
+                <input type="file" id="banner_image" name="banner_image" class="form-control" accept="image/*">
+                <small class="form-text" style="color: #666; font-size: 0.875rem;">
+                    Upload a banner image for your event (JPG, PNG, or GIF, max 16MB)
+                </small>
+                <div id="banner_preview" style="margin-top: 1rem; display: none;">
+                    <img id="preview_img" src="" alt="Banner Preview" style="max-width: 100%; max-height: 200px; border-radius: 4px; border: 1px solid #ddd;">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="status">Status</label>
+                <select id="status" name="status" class="form-select">
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                </select>
+            </div>
+            <div id="error-message" style="display: none; padding: 1rem; margin-top: 1rem; background-color: #f8d7da; color: #721c24; border-radius: 4px;"></div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;" id="submitBtn">
+                <span id="submitText">Create Event</span>
+                <span id="submitSpinner" style="display: none;">Creating...</span>
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Function to initialize the page after authentication is verified
+    function initializePage() {
+        console.log('Initializing create event page...');
+        
+        // Load venues
+        const token = localStorage.getItem('access_token');
+        fetch('/api/venues', {
+            headers: {
+                'Authorization': 'Bearer ' + token
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Failed to load venues');
+            }
+            return response.json();
+        })
+        .then(venues => {
+            const select = document.getElementById('venue_id');
+            if (venues.length === 0) {
+                select.innerHTML = '<option value="">No venues available. Please contact admin.</option>';
+                alert('No venues available. Please run the populate_venues.py script to add venues.');
+            } else {
+                venues.forEach(venue => {
+                    const option = document.createElement('option');
+                    option.value = venue.venue_id;
+                    option.textContent = `${venue.venue_name} - ${venue.city} (Capacity: ${venue.capacity})`;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Error loading venues:', error);
+            alert('Error loading venues. Please refresh the page.');
+        });
+        
+        // Banner image preview handler
+        const bannerInput = document.getElementById('banner_image');
+        if (bannerInput) {
+            bannerInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    if (file.size > 16 * 1024 * 1024) {
+                        alert('File size exceeds 16MB. Please choose a smaller image.');
+                        e.target.value = '';
+                        return;
+                    }
+                    
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        document.getElementById('preview_img').src = event.target.result;
+                        document.getElementById('banner_preview').style.display = 'block';
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    document.getElementById('banner_preview').style.display = 'none';
+                }
+            });
+        }
+        
+        // Form submission handler
+        const form = document.getElementById('createEventForm');
+        if (form) {
+            form.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                console.log('Form submission started');
+                
+                const errorDiv = document.getElementById('error-message');
+                const submitBtn = document.getElementById('submitBtn');
+                const submitText = document.getElementById('submitText');
+                const submitSpinner = document.getElementById('submitSpinner');
+                
+                // Hide previous errors
+                errorDiv.style.display = 'none';
+                errorDiv.textContent = '';
+                
+                // Get form values
+                const eventName = document.getElementById('event_name').value.trim();
+                const venueId = document.getElementById('venue_id').value;
+                const startDateTime = document.getElementById('start_datetime').value;
+                const endDateTime = document.getElementById('end_datetime').value;
+                const description = document.getElementById('description').value;
+                const category = document.getElementById('category').value;
+                const status = document.getElementById('status').value;
+                const bannerFile = document.getElementById('banner_image').files[0];
+                
+                // Validate required fields
+                if (!eventName) {
+                    errorDiv.textContent = 'Please enter an event name';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                if (!venueId) {
+                    errorDiv.textContent = 'Please select a venue';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                if (!startDateTime) {
+                    errorDiv.textContent = 'Please select a start date and time';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                if (!endDateTime) {
+                    errorDiv.textContent = 'Please select an end date and time';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                // Validate dates
+                const startDate = new Date(startDateTime);
+                const endDate = new Date(endDateTime);
+                
+                if (isNaN(startDate.getTime())) {
+                    errorDiv.textContent = 'Invalid start date/time';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                if (isNaN(endDate.getTime())) {
+                    errorDiv.textContent = 'Invalid end date/time';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                if (endDate <= startDate) {
+                    errorDiv.textContent = 'End date and time must be after start date and time';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+                
+                // Disable submit button and show loading
+                submitBtn.disabled = true;
+                submitText.style.display = 'none';
+                submitSpinner.style.display = 'inline';
+                
+                try {
+                    console.log('Starting event creation process...');
+                    
+                    // Upload banner image if provided (optional - don't fail event creation if upload fails)
+                    let bannerUrl = null;
+                    if (bannerFile) {
+                        console.log('Uploading banner image...');
+                        try {
+                            const uploadFormData = new FormData();
+                            uploadFormData.append('banner', bannerFile);
+                            
+                            const uploadResponse = await fetch('/api/events/upload-banner', {
+                                method: 'POST',
+                                headers: {
+                                    'Authorization': 'Bearer ' + token
+                                },
+                                body: uploadFormData
+                            });
+                            
+                            if (!uploadResponse.ok) {
+                                let errorData;
+                                try {
+                                    errorData = await uploadResponse.json();
+                                } catch (e) {
+                                    errorData = { error: `Upload failed with status ${uploadResponse.status}` };
+                                }
+                                const errorMsg = errorData.error || errorData.message || 'Failed to upload banner image';
+                                console.error('Banner upload error:', errorData);
+                                // Warn user but continue without banner
+                                console.warn('Continuing event creation without banner image due to upload error');
+                                alert('Warning: Banner image upload failed. Event will be created without banner.\n\nError: ' + errorMsg);
+                                bannerUrl = null;
+                            } else {
+                                const uploadResult = await uploadResponse.json();
+                                bannerUrl = uploadResult.banner_url;
+                                console.log('Banner uploaded successfully:', bannerUrl);
+                            }
+                        } catch (uploadError) {
+                            console.error('Exception during banner upload:', uploadError);
+                            // Warn but continue
+                            console.warn('Continuing event creation without banner image');
+                            alert('Warning: Banner image upload failed. Event will be created without banner.');
+                            bannerUrl = null;
+                        }
+                    }
+                    
+                    // Prepare event data
+                    const eventData = {
+                        venue_id: parseInt(venueId),
+                        event_name: eventName,
+                        description: description || '',
+                        category: category || '',
+                        start_datetime: startDate.toISOString(),
+                        end_datetime: endDate.toISOString(),
+                        status: status || 'draft'
+                    };
+                    
+                    if (bannerUrl) {
+                        eventData.banner_image = bannerUrl;
+                    }
+                    
+                    console.log('Creating event with data:', eventData);
+                    
+                    // Create event
+                    const response = await fetch('/api/events', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + token
+                        },
+                        body: JSON.stringify(eventData)
+                    });
+                    
+                    console.log('Response status:', response.status);
+                    
+                    let result;
+                    try {
+                        result = await response.json();
+                        console.log('Response data:', result);
+                    } catch (e) {
+                        console.error('Failed to parse response:', e);
+                        throw new Error('Invalid response from server. Please check the console for details.');
+                    }
+                    
+                    if (response.ok) {
+                        console.log('Event created successfully!');
+                        alert('Event created successfully!');
+                        window.location.href = `/events/${result.event.event_id}`;
+                    } else {
+                        const errorMsg = result.error || result.message || 'Failed to create event';
+                        const errorDetails = result.details || result.received_start || result.received_end || '';
+                        console.error('Error creating event:', errorMsg, result);
+                        console.error('Full error response:', JSON.stringify(result, null, 2));
+                        
+                        errorDiv.textContent = 'Error: ' + errorMsg;
+                        if (errorDetails) {
+                            console.log('Error details:', errorDetails);
+                        }
+                        errorDiv.style.display = 'block';
+                        alert('Error: ' + errorMsg + '\n\nPlease check the browser console for more details.');
+                        submitBtn.disabled = false;
+                        submitText.style.display = 'inline';
+                        submitSpinner.style.display = 'none';
+                    }
+                } catch (error) {
+                    console.error('Exception during event creation:', error);
+                    const errorMsg = error.message || 'An unexpected error occurred. Please check the console for details.';
+                    errorDiv.textContent = 'Error: ' + errorMsg;
+                    errorDiv.style.display = 'block';
+                    alert('Error: ' + errorMsg);
+                    submitBtn.disabled = false;
+                    submitText.style.display = 'inline';
+                    submitSpinner.style.display = 'none';
+                }
+            });
+        } else {
+            console.error('Form element not found!');
+        }
+    }
+    
+    // Check authentication and user type
+    (function() {
+        const token = localStorage.getItem('access_token');
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        
+        if (!token) {
+            console.log('No token found, redirecting to login...');
+            window.location.href = '/login';
+            return;
+        }
+        
+        // Check if user is organizer or admin
+        if (user && user.user_type) {
+            if (user.user_type !== 'organizer' && user.user_type !== 'admin') {
+                console.log('User is not an organizer or admin, redirecting to dashboard...');
+                alert('You must be an organizer or admin to create events.');
+                window.location.href = '/dashboard/organizer';
+                return;
+            }
+            // User is authorized, initialize the page
+            console.log('User authorized, initializing page...');
+            initializePage();
+        } else {
+            // Fetch user profile to verify user type
+            console.log('Fetching user profile to verify permissions...');
+            fetch('/api/auth/profile', {
+                headers: {
+                    'Authorization': 'Bearer ' + token
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        localStorage.removeItem('access_token');
+                        localStorage.removeItem('user');
+                        window.location.href = '/login';
+                        return null;
+                    }
+                    throw new Error('Failed to get user profile');
+                }
+                return response.json();
+            })
+            .then(userData => {
+                if (!userData) return; // Already handled redirect
+                
+                localStorage.setItem('user', JSON.stringify(userData));
+                if (userData.user_type !== 'organizer' && userData.user_type !== 'admin') {
+                    console.log('User is not an organizer or admin, redirecting...');
+                    alert('You must be an organizer or admin to create events.');
+                    window.location.href = '/dashboard/organizer';
+                    return;
+                }
+                // User is authorized, initialize the page
+                console.log('User authorized, initializing page...');
+                initializePage();
+            })
+            .catch(error => {
+                console.error('Error checking user permissions:', error);
+                alert('Error checking permissions. Please try again.');
+                window.location.href = '/dashboard/organizer';
+            });
+        }
+    })();
+</script>
+{% endblock %}
